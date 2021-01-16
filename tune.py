@@ -12,7 +12,7 @@ import json
 from helpers import encode_dates, loguniform, similarity_encode
 
 df = pd.read_csv(
-    r"data\insurance.csv",
+    r"data\creditcard.csv",
     parse_dates=[],
     index_col=[],
     delimiter=",",
@@ -25,7 +25,7 @@ print(
     .sort_values(["dtype", "proportion unique"])
 )
 
-TARGET = "charges"
+TARGET = "Class"
 TARGET_LEAKAGE = []
 y = df[TARGET]
 X = df.drop(
@@ -55,7 +55,7 @@ if ENCODE:
         drop_original=False,
     )
 
-CATEGORIZE = True
+CATEGORIZE = False
 if CATEGORIZE:
     X[obj_cols] = X[obj_cols].astype("category")
 
@@ -76,8 +76,8 @@ Xs, ys = Xt.loc[sample_idx], yt.loc[sample_idx]
 ds = lgb.Dataset(Xs, ys)
 dv = lgb.Dataset(Xv, yv, free_raw_data=False)
 
-OBJECTIVE = "regression"
-METRIC = "rmse"
+OBJECTIVE = "binary"
+METRIC = "auc"
 MAXIMIZE = False
 EARLY_STOPPING_ROUNDS = 10
 MAX_ROUNDS = 10000
@@ -88,7 +88,7 @@ params = {
     "metric": METRIC,
     "verbose": -1,
     "n_jobs": 6,
-    # "num_classes": 1,
+    "num_classes": 1,
     # "tweedie_variance_power": 1.3,
 }
 
@@ -105,12 +105,11 @@ model = lgb.train(
 lgb.plot_importance(model, grid=False, max_num_features=20, importance_type="gain")
 plt.show()
 
-TUNE_ETA = False
+TUNE_ETA = True
+best_etas = {"learning_rate": [], "score": []}
 if TUNE_ETA:
-    best_etas = {"learning_rate": [], "score": []}
-
     for _ in range(30):
-        eta = loguniform(-5, 0)
+        eta = loguniform(-6, 0)
         best_etas["learning_rate"].append(eta)
         params["learning_rate"] = eta
         model = lgb.train(
@@ -162,9 +161,10 @@ if TUNE_ETA:
         verbose_eval=REPORT_ROUNDS,
     )
 else:
-    params["learning_rate"] = 0.009875772374731435
+    # best learning rate once run
+    params["learning_rate"] = 0.006343919291175603
 
-DROP_CORRELATED = False
+DROP_CORRELATED = True
 if DROP_CORRELATED:
     threshold = 0.75
     corr = Xt.corr(method="kendall")
@@ -245,7 +245,7 @@ if DROP_CORRELATED:
 else:
     correlated_features = set()
 
-DROP_UNIMPORTANT = False
+DROP_UNIMPORTANT = True
 if DROP_UNIMPORTANT:
     sorted_features = [
         feature
@@ -348,22 +348,23 @@ else:
     dt = lgb.Dataset(Xt, yt, silent=True)
     ds = lgb.Dataset(Xs, ys, silent=True)
     dv = lgb.Dataset(Xv, yv, silent=True)
-    # rmse: 3831
+    # logloss: 0.0024259020234480622
     best_params = {
-        "objective": "regression",
-        "metric": "rmse",
+        "objective": "binary",
+        "metric": "binary_logloss",
         "verbose": -1,
         "n_jobs": 6,
-        "learning_rate": 0.009875772374731435,
+        "num_classes": 1,
+        "learning_rate": 0.006343919291175603,
         "feature_pre_filter": False,
-        "lambda_l1": 1.8299011908715305e-06,
-        "lambda_l2": 0.007585780742403452,
+        "lambda_l1": 2.4372197591185075e-05,
+        "lambda_l2": 5.059319169584316,
         "num_leaves": 6,
-        "feature_fraction": 1.0,
-        "bagging_fraction": 0.9836888816811709,
-        "bagging_freq": 3,
-        "min_child_samples": 20,
-        "num_boost_rounds": 471,
+        "feature_fraction": 0.6,
+        "bagging_fraction": 0.7619786549768274,
+        "bagging_freq": 2,
+        "min_child_samples": 25,
+        "num_boost_rounds": 1814,
     }
     model = lgb.train(
         best_params,
@@ -384,3 +385,14 @@ lgb.plot_importance(
 figure_path = Path("figures")
 figure_path.mkdir(exist_ok=True)
 plt.savefig(figure_path / "feature_importance.png")
+
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    roc_curve,
+    plot_roc_curve,
+)
+
+fpr, tpr, thresholds = roc_curve(yt, model.predict(Xt))
+sns.lineplot(x=fpr, y=tpr)
+plt.show()
